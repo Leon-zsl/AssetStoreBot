@@ -12,7 +12,7 @@ class AssetstoreSpider(scrapy.Spider):
 	allowed_domains = ['assetstore.unity.com']
 	asset_store_url = 'https://assetstore.unity.com/publishers/%d'
 	publishers_start = 1
-	publishers_end = 2
+	publishers_end = 100000
 	default_next_page = 2
 	default_page_size = 24
 	pages = {}
