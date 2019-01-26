@@ -13,7 +13,10 @@ class AssetstoreSpider(scrapy.Spider):
 	asset_store_url = 'https://assetstore.unity.com/publishers/%d'
 	publishers_start = 1
 	publishers_end = 2
+	default_next_page = 2
+	default_page_size = 24
 	pages = {}
+
 	def start_requests(self):
 		for i in range(AssetstoreSpider.publishers_start, AssetstoreSpider.publishers_end):
 			yield scrapy.http.Request(AssetstoreSpider.asset_store_url % i, callback=self.parse_html)
@@ -22,52 +25,75 @@ class AssetstoreSpider(scrapy.Spider):
 	def parse_html(self, response):
 		table = response.selector.css('div[data-reactid="418"] > div')
 		for item in table:
-			uri = item.css('._1ClTv::attr(href)').extract()[0]
-			category = item.css('._2kcTW::text').extract()[0]
-			publisher = item.css('.q2zeR::text').extract()[0]
-			name = item.css('._1EyLb::text').extract()[0]
-			price = item.css('._223RA::text').extract()[0]
+			uris = item.css('._1ClTv::attr(href)').extract()
+			uri = uris[0] if len(uris ) > 0 else ''
+
+			categorys = item.css('._2kcTW::text').extract()
+			category = categorys[0] if len(categorys) > 0 else ''
+
+			publishers = item.css('.q2zeR::text').extract()
+			publisher = publishers[0] if len(publishers) > 0 else ''
+			
+			names = item.css('._1EyLb::text').extract()
+			name = names[0] if len(names) > 0 else ''
+			
+			prices = item.css('._223RA::text').extract()
+			price = prices[0] if len(prices) > 0 else 'FREE'
 			if price == 'FREE':
 				price = float(0.00)
 			else:
-				price = float(price.strip('$'))
-			rating_count = item.css('.NoXio::text').extract()[0]
-			rating_count = rating_count.strip('(').strip(')')
+				price = float(price.strip('$').strip())
+				
+			rating_counts = item.css('.NoXio::text').extract()
+			rating_count = rating_counts[0] if len(rating_counts) > 0 else ''
+			rating_count = rating_count.strip('(').strip(')').strip()
 			try:
 				rating_count = int(rating_count)
 			except Exception:
 				rating_count = 0
+
 			rating_score = len(item.css('.ifont-star'))
 
-			yield self.gen_item(name, uri, price, rating_score, rating_count, publisher, category)
+			yield self.gen_item(name,
+								uri,
+								price,
+								rating_score,
+								rating_count,
+								publisher,
+								category)
 
 		next = response.selector.css('button[label="Next"]')
 		if next:
-			yield self.gen_graphql_req(response.url.split('/')[-1], 2, 24)
+			yield self.gen_graphql_req(response.url.split('/')[-1],
+									AssetstoreSpider.default_next_page,
+									AssetstoreSpider.default_page_size)
 
 
 	def parse_json(self, response):
-		if not response.body or len(response.body) == 0:
+		if len(response.body) == 0:
 			return
 
-		data = json.loads(response.body)
-		print type(response.body), type(data)
-
-		if not 'data' in data[0]:
+		data = json.loads(response.body)[0]
+		if 'error' in data:
+			logging.error("error found: %s,%s", response.url, data['error'])
 			return
-		if not 'publisher' in data[0]['data']:
+		if not 'data' in data:
+			logging.warning("not data in response: %s", response.url)
 			return
-		if not 'packages' in data[0]['data']['publisher']:
+		if not 'publisher' in data['data']:
+			logging.warning("not publisher in response: %s", response.url)
 			return
-		if not 'results' in data[0]['data']['publisher']['packages']:
+		if not 'packages' in data['data']['publisher']:
+			logging.warning("not packages in response: %s", response.url)
 			return
-		results = data[0]['data']['publisher']['packages']['results']
+		if not 'results' in data['data']['publisher']['packages']:
+			logging.warning("not results in response: %s", response.url)
+			return
+		results = data['data']['publisher']['packages']['results']
 		if not results or len(results) == 0:
+			logging.warning("results is empty in response: %s", response.url)
 			return
 
-		page_index = response.meta['page_index']
-		page_size = response.meta['page_size']
-		publisher_id = response.meta['publisher_id']
 		for item in results:
 			name = item['name']
 			slug = item['slug']
@@ -82,10 +108,19 @@ class AssetstoreSpider(scrapy.Spider):
 			category_name = category['longName'].replace('/', ' > ')
 			category_slug = category['slug']
 			uri = os.path.join('packages', category_slug, slug)
-			yield self.gen_item(name, uri, price, rating_score, rating_count, publisher_name, category_name)
+			yield self.gen_item(name,
+								uri,
+								price,
+								rating_score,
+								rating_count,
+								publisher_name,
+								category_name)
 
+		page_index = response.meta['page_index']
+		page_size = response.meta['page_size']
+		publisher_id = response.meta['publisher_id']
 		if len(results) == page_size:
-			yield self.gen_graphql_req(publisher_id, page_index+1, page_size)
+			yield self.gen_graphql_req(publisher_id, page_index + 1, page_size)
 
 
 	def gen_graphql_req(self, publisher_id, page_index, page_size):
@@ -104,61 +139,15 @@ class AssetstoreSpider(scrapy.Spider):
 				'query': r"""query Publisher {
   publisher(id: $id) {
 	id
-	publisherProfileId
 	organizationId
 	name
-	description
-	website
-	keyImages {
-	  type
-	  imageUrl
-	  __typename
-	}
-	supportUrl
-	supportEmail
-	shortUrl
-	gaAccount
-	gaPrefix
-	lists(page: 1, size: 20) {
-	  total
-	  results {
-		...list
-		packages(size: 6) {
-		  total
-		  results {
-			...product
-			__typename
-		  }
-		  __typename
-		}
-		__typename
-	  }
-	  __typename
-	}
 	packages(page: $page, size: $size, sort_by: $orderBy, price: $price, rating: $rating, released: $released, plusPro: $plusPro) {
 	  total
 	  results {
 		...product
-		__typename
 	  }
-	  __typename
 	}
-	__typename
   }
-}
-
-fragment list on List {
-  id
-  type
-  listId
-  slug
-  name
-  description
-  ownerId
-  ownerType
-  status
-  headerImage
-  __typename
 }
 
 fragment product on Product {
@@ -167,17 +156,14 @@ fragment product on Product {
   itemId
   slug
   name
-  description
   rating {
 	average
 	count
-	__typename
   }
   currentVersion {
 	id
 	name
 	publishedDate
-	__typename
   }
   reviewCount
   downloadSize
@@ -186,19 +172,6 @@ fragment product on Product {
 	id
 	name
 	url
-	supportUrl
-	supportEmail
-	gaAccount
-	gaPrefix
-	__typename
-  }
-  mainImage {
-	big
-	facebook
-	small
-	icon
-	icon75
-	__typename
   }
   originalPrice {
 	itemId
@@ -210,39 +183,24 @@ fragment product on Product {
 	  percentage
 	  type
 	  saleType
-	  __typename
 	}
 	currency
 	entitlementType
-	__typename
-  }
-  images {
-	type
-	imageUrl
-	thumbnailUrl
-	__typename
   }
   category {
 	id
 	name
 	slug
 	longName
-	__typename
   }
   firstPublishedDate
-  publishNotes
   supportedUnityVersions
-  state
-  overlay
-  overlayText
   popularTags {
 	id
 	pTagId
 	name
-	__typename
   }
   plusProSale
-  __typename
 }
 """,
 			}]
@@ -273,6 +231,4 @@ fragment product on Product {
 		item['rating_count'] = rating_count
 		item['publisher'] = publisher
 		item['category'] = category
-		# logging.info("gen item:%s", item)
-		print 'gen item:', item
 		return item
