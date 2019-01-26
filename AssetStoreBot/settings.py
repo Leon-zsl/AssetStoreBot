@@ -14,7 +14,6 @@ BOT_NAME = 'AssetStoreBot'
 SPIDER_MODULES = ['AssetStoreBot.spiders']
 NEWSPIDER_MODULE = 'AssetStoreBot.spiders'
 
-
 # Crawl responsibly by identifying yourself (and your website) on the user-agent
 # USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_14_2) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/71.0.3578.98 Safari/537.36'
 
@@ -23,6 +22,10 @@ ROBOTSTXT_OBEY = True
 
 FEED_FORMAT = 'CSV'
 FEED_URI = 'file:///Users/apple/workspace/AssetStoreBot/export/%(name)s_%(time)s.csv'
+
+LOG_LEVEL = 'INFO'  # to only display errors
+LOG_FILE = './scrapy.log'
+LOG_STDOUT = True
 
 # Configure maximum concurrent requests performed by Scrapy (default: 16)
 CONCURRENT_REQUESTS = 4
